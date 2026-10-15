@@ -12,7 +12,7 @@ scratch\          files Claude wrote during the session (its Temp scratchpad)
 
 ## Requirements
 
-- Windows, PowerShell 5.1+ (bundled with Windows).
+- Windows, PowerShell 5.1+ (bundled with Windows), [Claude Code](https://claude.com/claude-code).
 - [`uv`](https://docs.astral.sh/uv/) on PATH, for `uvx` - the script shells out to
   [`claude-code-log`](https://github.com/daaain/claude-code-log) to render the transcript.
   `install.ps1` warns if `uvx` is missing; without it, the export still runs but
@@ -20,22 +20,29 @@ scratch\          files Claude wrote during the session (its Temp scratchpad)
 
 ## Install
 
+Clone this repo anywhere - it does not need to live in any particular folder - then run:
+
 ```powershell
+git clone https://github.com/4rvyn/claude-export.git
+cd claude-export
 .\install.ps1
 ```
 
-This copies two small entry points into place; the real script stays in this folder and is never
+This copies two small entry points into place, with the path to *this* clone's
+`Export-ClaudeSession.ps1` baked into them, so the real script itself stays here and is never
 duplicated:
 
-- the Claude Code skill, to `~/.claude/skills/export-session/SKILL.md`
+- the Claude Code skill, to `~/.claude/skills/claude-export/SKILL.md`
 - the `claude-export` command (for `cmd`, PowerShell and Git Bash), to `~/.local/bin/`
 
-Run `.\install.ps1 -Check` any time to verify both are in place and up to date with this folder.
+Run `.\install.ps1 -Check` any time to verify both are in place and up to date with this folder. If
+you move the clone to a different folder, run `.\install.ps1` again from the new location to repoint
+them.
 
 To uninstall, delete the two generated copies - nothing else to clean up:
 
 ```powershell
-Remove-Item "$HOME\.claude\skills\export-session" -Recurse
+Remove-Item "$HOME\.claude\skills\claude-export" -Recurse
 Remove-Item "$HOME\.local\bin\claude-export", "$HOME\.local\bin\claude-export.cmd"
 ```
 
@@ -63,7 +70,7 @@ claude-export 472b8bb8 -Out D:\backups   # export somewhere other than ~\Desktop
 tokens for the one tool call):
 
 ```
-/export-session
+/claude-export
 ```
 
 ## How it finds a session
@@ -76,12 +83,12 @@ transcript itself mentions when collecting those extra folders.
 ## Layout
 
 ```
-Export-ClaudeSession.ps1       the real script - the only copy; everything else points at it
-install.ps1                    wires up the two entry points below
-skill/export-session/SKILL.md  source for the Claude Code skill
-bin/claude-export               source for the command (Git Bash)
-bin/claude-export.cmd           source for the command (cmd / PowerShell)
-tests/                         offline tests for the session-matching and safety-check logic
+Export-ClaudeSession.ps1      the real script - the only copy; everything else points at it
+install.ps1                   wires up the two entry points below, substituting this clone's path
+skill/claude-export/SKILL.md  source for the Claude Code skill (a template, see install.ps1)
+bin/claude-export             source for the command (Git Bash, a template)
+bin/claude-export.cmd         source for the command (cmd / PowerShell, a template)
+tests/                        offline tests for the session-matching and safety-check logic
 ```
 
 To change behaviour, edit `Export-ClaudeSession.ps1` here and run `.\install.ps1` again - there is
