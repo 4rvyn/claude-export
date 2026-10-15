@@ -1,0 +1,3 @@
+#!/bin/sh
+# Git Bash launcher; PowerShell and cmd use claude-export.cmd next to this file.
+exec powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME/Desktop/tools/claude-export/Export-ClaudeSession.ps1" "$@"
