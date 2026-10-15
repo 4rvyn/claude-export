@@ -12,7 +12,9 @@
 #                                                       feeding the transcript to a fresh AI session
 param(
     [string]$Session,
-    [string]$Out = "$HOME\Desktop\Claude-Exports",
+    # GetFolderPath, not $HOME\Desktop: with OneDrive folder backup the real Desktop lives elsewhere
+    [ValidateNotNullOrEmpty()]
+    [string]$Out = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude-Exports'),
     [switch]$List,
     # Forwarded to claude-code-log. Unset = today's default ('tool': full detail, cleaned of
     # system/hook noise). 'agent' or 'assistant' drop tool calls/results entirely - much smaller,
@@ -36,14 +38,17 @@ if ($List -or -not $Session) {
 }
 
 $match = @($all | Where-Object { $_.BaseName -like "$Session*" })
-if ($match.Count -ne 1) { Write-Error "Found $($match.Count) sessions starting with '$Session'. Use -List and give more characters."; return }
+if ($match.Count -ne 1) { Write-Error "Found $($match.Count) sessions starting with '$Session'. Use -List and give more characters."; exit 1 }
 $jsonl = $match[0]
 $id = $jsonl.BaseName
 
+# Absolute now: claude-code-log runs from $HOME below, so a relative -Out would split the export in two.
+$Out = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
+
 # Writing inside a folder this script copies from makes it copy its own output forever.
-$outFull = [IO.Path]::GetFullPath($Out).TrimEnd('\') + '\'
+$outFull = $Out.TrimEnd('\') + '\'
 foreach ($src in "$env:LOCALAPPDATA\Temp\claude\", "$HOME\.claude\") {
-    if ($outFull.StartsWith($src, [StringComparison]::OrdinalIgnoreCase)) { Write-Error "-Out must not be inside $src"; return }
+    if ($outFull.StartsWith($src, [StringComparison]::OrdinalIgnoreCase)) { Write-Error "-Out must not be inside $src"; exit 1 }
 }
 
 # An 8-char id prefix is what -List shows and normally unique enough for one folder name, but two
@@ -61,12 +66,13 @@ for ($len = 8; $true; $len += 4) {
     if ($len -ge $id.Length) { break }  # out of characters to disambiguate with; reuse/overwrite as before
 }
 New-Item -ItemType Directory -Force $dest | Out-Null
-Set-Content $marker $id -NoNewline
-(Get-Item $marker).Attributes = 'Hidden'  # keep it out of the summary listing at the end
+Set-Content $marker $id -NoNewline -Force  # -Force: on a re-export the marker is already hidden
+(Get-Item $marker -Force).Attributes = 'Hidden'  # keep it out of the summary listing at the end
 Write-Host "Exporting $id to $dest"
 
 # Run from home: uvx refuses to start when the current folder is inside its own cache.
 Push-Location $HOME
+$convertFailed = $false
 foreach ($fmt in 'html', 'md') {
     # Pinned to a known-good version rather than "latest": uvx would otherwise fetch whatever
     # claude-code-log the maintainer happens to have published on PyPI at the moment this runs,
@@ -78,6 +84,7 @@ foreach ($fmt in 'html', 'md') {
     }
     $log = & uvx claude-code-log@1.7.0 convert $jsonl.FullName --format $fmt --image-export-mode $(if ($fmt -eq 'md') { 'referenced' } else { 'embedded' }) @extraArgs -o "$dest\transcript.$fmt" 2>&1
     if (-not (Test-Path "$dest\transcript.$fmt")) {
+        $convertFailed = $true
         Write-Warning "transcript.$fmt was not created:"
         $log | ForEach-Object { "$_" } | Where-Object { $_ -notmatch 'Loading agent|unrecognized message type' } | Select-Object -Last 10 | Write-Host
     }
@@ -106,3 +113,5 @@ foreach ($sid in $ids) {
 }
 
 Get-ChildItem $dest | Format-Table Name, @{n='MB';e={ if ($_.PSIsContainer) { [math]::Round((Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum/1MB,1) } else { [math]::Round($_.Length/1MB,1) } }} -AutoSize
+if ($convertFailed) { exit 1 }  # uploads/scratch were still copied, but the export is incomplete
+exit 0  # robocopy leaves its own non-zero "files copied" code in $LASTEXITCODE

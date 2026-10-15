@@ -2,12 +2,12 @@
 
 [![License: MIT](https://img.shields.io/github/license/4rvyn/claude-export)](LICENSE)
 
-Export a Claude Code session into one readable folder — transcript, uploads, scratch files — without
+Export a Claude Code session into one readable folder (transcript, uploads, scratch files) without
 spending a token to do it.
 
 ```
 > !claude-export
-Exporting 472b8bb8-9c3a-4e21-8f0d-1a2b3c4d5e6f to ~\Desktop\Claude-Exports\2026-10-15_472b8bb8
+Exporting 472b8bb8-9c3a-4e21-8f0d-1a2b3c4d5e6f to C:\Users\you\Desktop\Claude-Exports\2026-10-15_472b8bb8
 
 Name              MB
 ----              --
@@ -26,7 +26,7 @@ Requires Windows, PowerShell 5.1+, [Claude Code](https://claude.com/claude-code)
 ```powershell
 git clone https://github.com/4rvyn/claude-export.git
 cd claude-export
-.\install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 Wires up two things, both pointing at *this* clone - nothing else on your system is touched:
@@ -34,7 +34,7 @@ Wires up two things, both pointing at *this* clone - nothing else on your system
 - a Claude Code skill (`/claude-export`)
 - a shell command (`claude-export`, works in PowerShell, cmd and Git Bash)
 
-Moved the clone? Run `.\install.ps1` again to repoint them. `.\install.ps1 -Check` just verifies, no changes.
+Moved the clone? Run the install line again to repoint them. Add `-Check` to verify without changing anything.
 
 ## Use
 
@@ -43,7 +43,7 @@ Moved the clone? Run `.\install.ps1` again to repoint them. `.\install.ps1 -Chec
 claude-export                             # any other shell: exports CLAUDE_CODE_SESSION_ID, if set
 claude-export 472b8bb8                    # export by the start of a session ID
 claude-export -List                       # show recent sessions
-claude-export 472b8bb8 -Out D:\backups    # somewhere other than ~\Desktop\Claude-Exports
+claude-export 472b8bb8 -Out D:\backups    # somewhere other than Desktop\Claude-Exports
 claude-export 472b8bb8 -Depth agent       # condensed - no tool calls/results - for feeding to a fresh AI
 /claude-export                            # ask Claude to run it for you (costs a few tokens)
 ```

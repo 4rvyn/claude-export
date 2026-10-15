@@ -23,7 +23,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $script = Join-Path $root 'Export-ClaudeSession.ps1'
 $installScript = Join-Path $root 'install.ps1'
 $failed = 0
-$defaultExportDir = Join-Path $HOME 'Desktop\Claude-Exports'
+$defaultExportDir = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude-Exports'
 
 # PowerShell silently drops an empty-string argument when calling a native exe (powershell.exe
 # here counts as native). The fix is the well-known '""' trick: a literal two-double-quote token
@@ -80,7 +80,7 @@ Check "-List runs and prints a table" {
 
 Check "zero matches is a clear error, not a crash" {
     $r = Invoke-Pwsh $script @('zzz-no-such-session-prefix-zzz')
-    ($r.Text -match 'Found 0 sessions starting with') -and ($r.ExitCode -eq 0)
+    ($r.Text -match 'Found 0 sessions starting with') -and ($r.ExitCode -eq 1)
 }
 
 Check "an ambiguous prefix (matches 2+ sessions) is a clear error, not a silent pick" {
@@ -93,7 +93,7 @@ Check "an ambiguous prefix (matches 2+ sessions) is a clear error, not a silent 
     }
     if (-not $prefix) { throw "no two sessions under ~/.claude/projects share a short prefix - cannot exercise this path right now" }
     $r = Invoke-Pwsh $script @($prefix)
-    ($r.Text -match "Found $expected sessions starting with") -and ($r.ExitCode -eq 0)
+    ($r.Text -match "Found $expected sessions starting with") -and ($r.ExitCode -eq 1)
 }
 
 Check "empty-string session argument with no ambient session falls back to -List (safe), not an export" {
@@ -149,14 +149,14 @@ Check "-Out inside ~/.claude is refused before anything runs" {
     $id = Get-OneRealSessionId
     $badOut = Join-Path $HOME '.claude\should-not-be-written'
     $r = Invoke-Pwsh $script @($id, '-Out', $badOut)
-    ($r.Text -match '-Out must not be inside') -and (-not (Test-Path $badOut))
+    ($r.Text -match '-Out must not be inside') -and ($r.ExitCode -eq 1) -and (-not (Test-Path $badOut))
 }
 
 Check "-Out inside `$env:LOCALAPPDATA\Temp\claude is refused before anything runs" {
     $id = Get-OneRealSessionId
     $badOut = Join-Path $env:LOCALAPPDATA 'Temp\claude\should-not-be-written'
     $r = Invoke-Pwsh $script @($id, '-Out', $badOut)
-    ($r.Text -match '-Out must not be inside') -and (-not (Test-Path $badOut))
+    ($r.Text -match '-Out must not be inside') -and ($r.ExitCode -eq 1) -and (-not (Test-Path $badOut))
 }
 
 # ---- real end-to-end export (scratch temp dir only) ----
@@ -203,6 +203,24 @@ Check "-Depth agent forwards to claude-code-log and produces a condensed transcr
     }
 }
 
+Check "a failed transcript conversion (uvx missing) exits 1" {
+    $small = Get-AllSessionFiles | Where-Object { $_.Length -gt 0 } | Sort-Object Length | Select-Object -First 1
+    if (-not $small) { throw "no session file found under ~/.claude/projects to export" }
+    $noUvx = ($env:PATH -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'uvx.exe')) }) -join ';'
+    $tempOut = Join-Path $env:TEMP ("claude-export-test-{0}" -f ([guid]::NewGuid()))
+    try {
+        $r = Invoke-Pwsh $script @($small.BaseName.Substring(0, 8), '-Out', $tempOut) -EnvOverrides @{ PATH = $noUvx }
+        ($r.ExitCode -eq 1) -and ($r.Text -match 'was not created')
+    } finally {
+        if (Test-Path $tempOut) { Remove-Item -Recurse -Force $tempOut -ErrorAction SilentlyContinue }
+    }
+}
+
+Check "an empty -Out is rejected, not taken as the current folder" {
+    $r = Invoke-Pwsh $script @('zzz-no-such-session-prefix-zzz', '-Out', '')
+    ($r.ExitCode -ne 0) -and ($r.Text -match 'null or empty')
+}
+
 Check "an invalid -Depth value is rejected cleanly" {
     $r = Invoke-Pwsh $script @('-List', '-Depth', 'bogus')
     ($r.ExitCode -ne 0) -and ($r.Text -match 'ValidateSet|does not belong to the set')
@@ -233,16 +251,36 @@ Check "a pre-existing folder from a DIFFERENT session with the same date+prefix 
     }
 }
 
-Check "re-exporting the same session reuses its own folder instead of widening again" {
+Check "re-exporting the same session reuses its own folder, without errors" {
+    # The second run used to print two red errors: Get-Item cannot see the (hidden) marker without -Force.
     $small = Get-AllSessionFiles | Where-Object { $_.Length -gt 0 } | Sort-Object Length | Select-Object -First 1
     if (-not $small) { throw "no session file found under ~/.claude/projects to export" }
     $tempOut = Join-Path $env:TEMP ("claude-export-test-{0}" -f ([guid]::NewGuid()))
     try {
         Invoke-Pwsh $script @($small.BaseName.Substring(0, 8), '-Out', $tempOut) | Out-Null
-        Invoke-Pwsh $script @($small.BaseName.Substring(0, 8), '-Out', $tempOut) | Out-Null
-        (Get-ChildItem $tempOut -Directory).Count -eq 1
+        $r = Invoke-Pwsh $script @($small.BaseName.Substring(0, 8), '-Out', $tempOut)
+        if ($r.Text -match 'CategoryInfo') { throw "second export printed an error:`n$($r.Text)" }
+        ((Get-ChildItem $tempOut -Directory).Count -eq 1) -and ($r.ExitCode -eq 0)
     } finally {
         if (Test-Path $tempOut) { Remove-Item -Recurse -Force $tempOut -ErrorAction SilentlyContinue }
+    }
+}
+
+Check "a relative -Out keeps the transcripts inside the export folder" {
+    # claude-code-log runs from $HOME, so a relative -Out used to send the transcripts nowhere useful.
+    $small = Get-AllSessionFiles | Where-Object { $_.Length -gt 0 } | Sort-Object Length | Select-Object -First 1
+    if (-not $small) { throw "no session file found under ~/.claude/projects to export" }
+    $cwd = Join-Path $env:TEMP ("claude-export-test-{0}" -f ([guid]::NewGuid()))
+    New-Item -ItemType Directory $cwd | Out-Null
+    Push-Location $cwd
+    try {
+        $r = Invoke-Pwsh $script @($small.BaseName.Substring(0, 8), '-Out', 'rel')
+        $dest = Get-ChildItem (Join-Path $cwd 'rel') -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $dest) { throw "no export folder under the relative -Out. Output:`n$($r.Text)" }
+        Test-Path (Join-Path $dest.FullName 'transcript.html')
+    } finally {
+        Pop-Location
+        Remove-Item -Recurse -Force $cwd -ErrorAction SilentlyContinue
     }
 }
 
@@ -250,7 +288,31 @@ Check "re-exporting the same session reuses its own folder instead of widening a
 
 Check "install.ps1 -Check passes after install.ps1 has run" {
     $r = Invoke-Pwsh $installScript @('-Check')
-    $r.Text -match 'up to date'
+    ($r.Text -match 'up to date') -and ($r.ExitCode -eq 0)
+}
+
+Check "install from a clone under a non-ASCII path: the .cmd launcher works in both OEM and UTF-8 consoles" {
+    # A clone under a folder with an umlaut used to produce launchers with a mangled path. Installs into a
+    # throwaway USERPROFILE so the real ~/.claude and ~/.local/bin are never touched. The umlaut is built from
+    # its code point: Windows PowerShell reads this file as ANSI, so a literal one would not survive.
+    $base = Join-Path $env:TEMP ("claude-export-test-J{0}rg-{1}" -f [char]0xF6, ([guid]::NewGuid().ToString('N').Substring(0, 6)))
+    $clone = Join-Path $base 'claude-export'
+    $fakeHome = Join-Path $base 'home'
+    New-Item -ItemType Directory $clone, $fakeHome | Out-Null
+    try {
+        Get-ChildItem $root -Exclude '.git' | Copy-Item -Destination $clone -Recurse
+        $r = Invoke-Pwsh (Join-Path $clone 'install.ps1') @() -EnvOverrides @{ USERPROFILE = $fakeHome }
+        if ($r.ExitCode -ne 0) { throw "install failed:`n$($r.Text)" }
+        $cmd = Join-Path $fakeHome '.local\bin\claude-export.cmd'
+        $ok = $true
+        foreach ($cp in 437, 65001) {
+            $out = (cmd /c "chcp $cp >nul & `"$cmd`" -List" 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            if ($out -notmatch 'Session\s+Last used') { Write-Host "  code page $cp :`n$out"; $ok = $false }
+        }
+        $ok
+    } finally {
+        Remove-Item -Recurse -Force $base -ErrorAction SilentlyContinue
+    }
 }
 
 # ---- final safety net ----
