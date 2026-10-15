@@ -8,10 +8,18 @@
 #   .\Export-ClaudeSession.ps1                  inside a Claude session (! prefix): export that session
 #   .\Export-ClaudeSession.ps1 -List            show recent sessions
 #   .\Export-ClaudeSession.ps1 472b8bb8         export by (start of) session ID
+#   .\Export-ClaudeSession.ps1 472b8bb8 -Depth agent   condensed: drops tool calls/results, for
+#                                                       feeding the transcript to a fresh AI session
 param(
     [string]$Session,
     [string]$Out = "$HOME\Desktop\Claude-Exports",
-    [switch]$List
+    [switch]$List,
+    # Forwarded to claude-code-log. Unset = today's default ('tool': full detail, cleaned of
+    # system/hook noise). 'agent' or 'assistant' drop tool calls/results entirely - much smaller,
+    # good for feeding a past session to a fresh AI session (claude-code-log's own README
+    # recommends --depth agent --format md --compact for exactly that).
+    [ValidateSet('session', 'user', 'assistant', 'agent', 'tool', 'hook')]
+    [string]$Depth
 )
 
 # Claude Code sets this in shells it starts, including "!" commands typed in a session.
@@ -60,7 +68,15 @@ Write-Host "Exporting $id to $dest"
 # Run from home: uvx refuses to start when the current folder is inside its own cache.
 Push-Location $HOME
 foreach ($fmt in 'html', 'md') {
-    $log = & uvx claude-code-log convert $jsonl.FullName --format $fmt --image-export-mode $(if ($fmt -eq 'md') { 'referenced' } else { 'embedded' }) -o "$dest\transcript.$fmt" 2>&1
+    # Pinned to a known-good version rather than "latest": uvx would otherwise fetch whatever
+    # claude-code-log the maintainer happens to have published on PyPI at the moment this runs,
+    # with no review on our end. Bump this deliberately when there's a reason to.
+    $extraArgs = @()
+    if ($Depth) {
+        $extraArgs += '--depth', $Depth
+        if ($fmt -eq 'md') { $extraArgs += '--compact' }  # pairs with --depth per claude-code-log's README; no-op for HTML
+    }
+    $log = & uvx claude-code-log@1.7.0 convert $jsonl.FullName --format $fmt --image-export-mode $(if ($fmt -eq 'md') { 'referenced' } else { 'embedded' }) @extraArgs -o "$dest\transcript.$fmt" 2>&1
     if (-not (Test-Path "$dest\transcript.$fmt")) {
         Write-Warning "transcript.$fmt was not created:"
         $log | ForEach-Object { "$_" } | Where-Object { $_ -notmatch 'Loading agent|unrecognized message type' } | Select-Object -Last 10 | Write-Host

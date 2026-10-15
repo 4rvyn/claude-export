@@ -64,6 +64,8 @@ claude-export                # export the session CLAUDE_CODE_SESSION_ID points 
 claude-export 472b8bb8        # export by the start of a session ID
 claude-export -List           # show recent sessions (ID prefix, last used, size, project folder)
 claude-export 472b8bb8 -Out D:\backups   # export somewhere other than ~\Desktop\Claude-Exports
+claude-export 472b8bb8 -Depth agent      # condensed transcript for feeding to a fresh AI session
+                                          # (drops tool calls/results; session/user/assistant/agent/tool/hook, default tool)
 ```
 
 **By asking Claude** (it will run the skill above for you, through the model - costs a small number of
@@ -79,6 +81,47 @@ Every Claude Code session is a `.jsonl` transcript under `~/.claude/projects/*/`
 there, matches your argument against the start of a session ID, and - because a resumed session gets a
 new ID while its uploads and scratch files stay filed under the old one - follows every session ID the
 transcript itself mentions when collecting those extra folders.
+
+## What this touches
+
+**Reads:**
+- `~\.claude\projects\*\*.jsonl` — your session transcripts, to find and parse the one you're exporting
+- `~\.claude\uploads\<session-id>\` — images you uploaded/dropped into that session
+- `%LOCALAPPDATA%\Temp\claude\*\<session-id>\scratchpad` — files Claude wrote during that session
+
+**Writes:**
+- A new folder under `~\Desktop\Claude-Exports` (or wherever `-Out` points) containing
+  `transcript.html`, `transcript.md`, `uploads\`, `scratch\`, and a small hidden `.session-id` marker
+- `~\.claude\skills\claude-export\SKILL.md` and `~\.local\bin\claude-export(.cmd)` — only during
+  `install.ps1`, and only those two small files, substituting the path to this clone
+
+**Runs:**
+- `uvx` (part of [`uv`](https://docs.astral.sh/uv/)), to fetch and run
+  [`claude-code-log`](https://github.com/daaain/claude-code-log) — pinned to a specific known-good
+  version (`claude-code-log@1.7.0`) rather than "latest," so a run today and a run next year use the
+  exact same code
+- `robocopy`, to copy the uploads/scratch folders locally (no network flags used)
+
+**Network access:** the one `uvx claude-code-log@1.7.0` call above downloads that package from PyPI the
+first time it runs (cached by `uv` after that). That's it. Nothing else in this repo makes a network
+request, and that one call never uploads or transmits your transcripts, uploads, or scratch files
+anywhere — it only pulls down a renderer that then runs entirely on your machine, reading and writing
+local files.
+
+**What it does NOT do:** no telemetry, no analytics, no phone-home, no admin/elevated rights needed or
+requested, no registry changes, no modification of your system PATH, no files touched outside your own
+user profile folder and the export destination you choose. `install.ps1` only ever writes the two
+entry-point files listed above; everything else (`Export-ClaudeSession.ps1` itself) stays in this
+cloned folder and is never copied anywhere.
+
+You'll see `-ExecutionPolicy Bypass` in the launcher scripts (`bin/claude-export`,
+`bin/claude-export.cmd`). This is not a security bypass of anything meaningful — it only tells that one
+child PowerShell process to ignore the "don't run unsigned scripts" default, which is the normal,
+necessary way any unsigned open-source PowerShell script runs on a default Windows install. It does not
+touch the system-wide execution policy or elevate privileges.
+
+Read `Export-ClaudeSession.ps1` yourself — it's under 100 lines, plainly commented, and this list is
+exhaustive.
 
 ## Layout
 

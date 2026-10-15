@@ -177,6 +177,37 @@ Check "end-to-end export of a small real session creates non-empty transcript.ht
     }
 }
 
+Check "-Depth agent forwards to claude-code-log and produces a condensed transcript" {
+    # Pick a session with real tool-call content so -Depth agent (which drops tool calls/results)
+    # has something to actually remove; a tiny session could legitimately produce the same size.
+    $mid = Get-AllSessionFiles | Where-Object Length -gt 200KB | Sort-Object Length | Select-Object -First 1
+    if (-not $mid) { throw "no session over 200KB found under ~/.claude/projects to exercise -Depth with" }
+    $tempA = Join-Path $env:TEMP ("claude-export-test-{0}" -f ([guid]::NewGuid()))
+    $tempB = Join-Path $env:TEMP ("claude-export-test-{0}" -f ([guid]::NewGuid()))
+    try {
+        $idPrefix = $mid.BaseName.Substring(0, 8)
+        $r1 = Invoke-Pwsh $script @($idPrefix, '-Out', $tempA, '-Depth', 'agent')
+        $r2 = Invoke-Pwsh $script @($idPrefix, '-Out', $tempB)
+        $destA = Get-ChildItem $tempA -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        $destB = Get-ChildItem $tempB -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $destA) { throw "no destination folder for -Depth agent run. Output:`n$($r1.Text)" }
+        if (-not $destB) { throw "no destination folder for the default run. Output:`n$($r2.Text)" }
+        $mdA = Join-Path $destA.FullName 'transcript.md'
+        $mdB = Join-Path $destB.FullName 'transcript.md'
+        $lenA = (Get-Item $mdA).Length
+        $lenB = (Get-Item $mdB).Length
+        (Test-Path $mdA) -and ($lenA -gt 0) -and ($lenA -lt $lenB)
+    } finally {
+        if (Test-Path $tempA) { Remove-Item -Recurse -Force $tempA -ErrorAction SilentlyContinue }
+        if (Test-Path $tempB) { Remove-Item -Recurse -Force $tempB -ErrorAction SilentlyContinue }
+    }
+}
+
+Check "an invalid -Depth value is rejected cleanly" {
+    $r = Invoke-Pwsh $script @('-List', '-Depth', 'bogus')
+    ($r.ExitCode -ne 0) -and ($r.Text -match 'ValidateSet|does not belong to the set')
+}
+
 # ---- folder-name collision ----
 
 Check "a pre-existing folder from a DIFFERENT session with the same date+prefix is not overwritten" {
